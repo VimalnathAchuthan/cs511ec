@@ -1,0 +1,43 @@
+name: auto-grade
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual workflows runs
+    inputs:
+      grader_parameters:
+        description: 'Parameters to pass to python grade.py (optional)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest  # Use the latest version of Ubuntu
+    strategy:
+      fail-fast: false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4  # Check out your repository's code
+
+    - name: Set up Python
+      uses: actions/setup-python@v5  # Set up Python environment
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt  # If you have a requirements.txt file
+
+    - name: download the data
+      run:  |
+        gdown --fuzzy 'https://drive.google.com/file/d/1Zy-FJwcJrJXP6EUojZLFGR6e3TFhP35U/view?usp=sharing'
+        unzip 2.zip -d data
+        gdown --fuzzy 'https://drive.google.com/file/d/1zXWHfNNXcEIRPNY87vAXArWWsjwekbaM/view?usp=sharing'
+        unzip d1-p2.zip -d expect
+        gdown --fuzzy 'https://drive.google.com/file/d/1i7kdOE5QdXd-vkK5_un3zfTPVIDSTg_0/view?usp=sharing'
+        unzip d2-p3.zip -d expect
+
+    - name: run the grader using grade.py
+      run: python grade.py ${{ github.event.inputs.grader_parameters }}
