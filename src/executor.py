@@ -6,6 +6,8 @@
 '''
 
 import pandas as pd
+import numpy as np
+import os
 
 from src.difference import Difference
 from src.optimizer import Optimizer
@@ -15,27 +17,103 @@ from src.report import get_file, report
 class Executor(object):
     def __init__(self, data: str, pattern: str):
         self._opt = Optimizer(data, pattern)
-        # TODO: begin of your codes
-        '''
-        requirement:
-            1. [optional] can define and initialize new fields here
-            2. please put expensive computation inside self.result()
-        '''
-        # TODO: end of your codes
+        self._opt.run()
+        self._plan = self._opt._plan
+        self._data = self._opt._data
+        self._pattern = self._opt._pattern
 
     @report
     def result(self) -> str:
-        # TODO: begin of your codes
-        '''
-        requirements
-            1. use the Optimizer to compute an optimized plan
-            2. follow the plan to compute the result
-            3. save the final result to a csv file
-            4. return a string pointing the output file
-            5. you can add new fields and methods, and use them here
-        '''
-        return 'out/executor.csv'
-        # TODO: end of your codes
+        df_G = self._data.df.copy()
+        df_P = self._pattern.df.copy()
+
+        df_G['min_id'] = df_G[['src_id', 'dst_id']].min(axis=1)
+        df_G['max_id'] = df_G[['src_id', 'dst_id']].max(axis=1)
+        df_G['edge_key'] = df_G['min_id'].astype(str) + '_' + df_G['max_id'].astype(str) + '_' + df_G['edge_label'].astype(str)
+
+        df_G_counts = df_G.groupby('edge_key').size().reset_index(name='count')
+        df_G = df_G.merge(df_G_counts, on='edge_key', how='left')
+
+        df_G['edge_type'] = df_G['count'].apply(lambda x: 'undirected' if x == 2 else 'directed')
+
+        df_P['min_id'] = df_P[['src_id', 'dst_id']].min(axis=1)
+        df_P['max_id'] = df_P[['src_id', 'dst_id']].max(axis=1)
+        df_P['edge_key'] = df_P['min_id'].astype(str) + '_' + df_P['max_id'].astype(str) + '_' + df_P['edge_label'].astype(str)
+        df_P_counts = df_P.groupby('edge_key').size().reset_index(name='count')
+        df_P = df_P.merge(df_P_counts, on='edge_key', how='left')
+        df_P['edge_type'] = df_P['count'].apply(lambda x: 'undirected' if x == 2 else 'directed')
+
+        pattern_vertices = pd.unique(df_P[['src_id', 'dst_id']].values.ravel('K'))
+        pattern_vertices.sort()
+        variable_names = ['u{}'.format(i+1) for i in range(len(pattern_vertices))]
+        dict_pv = dict(zip(pattern_vertices, variable_names))
+        dict_pv_rev = {v: k for k, v in dict_pv.items()}
+
+        relations = {}
+
+        for item, _ in self._plan:
+            ui, uj = item.split(',')
+
+            src_id_p = dict_pv_rev[ui]
+            dst_id_p = dict_pv_rev[uj]
+
+            edge_p = df_P[
+                ((df_P['src_id'] == src_id_p) & (df_P['dst_id'] == dst_id_p) & (df_P['edge_label'].notnull())) |
+                ((df_P['src_id'] == dst_id_p) & (df_P['dst_id'] == src_id_p) & (df_P['edge_label'].notnull()))
+            ].iloc[0]
+
+            src_label_p = edge_p['src_label']
+            dst_label_p = edge_p['dst_label']
+            edge_label_p = edge_p['edge_label']
+            edge_type_p = edge_p['edge_type']
+
+            if edge_type_p == 'directed':
+                df_match = df_G[
+                    (df_G['edge_type'] == 'directed') &
+                    (df_G['edge_label'] == edge_label_p) &
+                    (df_G['src_label'] == src_label_p) &
+                    (df_G['dst_label'] == dst_label_p)
+                ][['src_id', 'dst_id']].copy()
+                df_match.columns = [ui, uj]
+            else:
+                df_match = df_G[
+                    (df_G['edge_type'] == 'undirected') &
+                    (df_G['edge_label'] == edge_label_p) &
+                    (
+                        ((df_G['src_label'] == src_label_p) & (df_G['dst_label'] == dst_label_p)) |
+                        ((df_G['src_label'] == dst_label_p) & (df_G['dst_label'] == src_label_p))
+                    )
+                ][['src_id', 'dst_id']].copy()
+                df_match_rev = df_match.copy()
+                df_match_rev.columns = [uj, ui]
+                df_match.columns = [ui, uj]
+                df_match = pd.concat([df_match, df_match_rev], ignore_index=True)
+
+            df_match.drop_duplicates(inplace=True)
+            relations[item] = df_match
+
+        result_df = None
+        for item, _ in self._plan:
+            df_relation = relations[item]
+            if result_df is None:
+                result_df = df_relation
+            else:
+                result_df = pd.merge(result_df, df_relation, how='inner')
+
+        for var in variable_names:
+            if var not in result_df.columns:
+                result_df[var] = np.nan
+
+        result_df = result_df[variable_names]
+        result_df.dropna(inplace=True)
+        result_df = result_df.astype(int)
+        result_df.sort_values(by=variable_names, inplace=True)
+
+        output_file = os.path.join('out', 'executor.csv')
+        os.makedirs('out', exist_ok=True)
+        result_df.to_csv(output_file, index=False, header=False)
+
+        return output_file
 
 
 def test_count(data: str, pattern: str, row_e: int, column_e: int) -> int:
