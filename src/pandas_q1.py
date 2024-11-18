@@ -13,26 +13,40 @@ from src.report import get_file, report
 
 @report
 def pandas_q1(data_file: str, pattern_file: str) -> str:
-    data_columns = ['src', 'dst', 'src_label', 'dst_label', 'edge_label']
-    pattern_columns = ['p_src', 'p_dst', 'p_src_label', 'p_dst_label', 'p_edge_label']
+    data = pd.read_csv(data_file, sep=" ", header=None, 
+                      names=['v1', 'v2', 'l1', 'l2', 'e'])
+    pattern = pd.read_csv(pattern_file, sep=" ", header=None,
+                         names=['v1', 'v2', 'l1', 'l2', 'e'])
 
-    data = pd.read_csv(data_file, sep=" ", header=None, names=data_columns)
-    pattern = pd.read_csv(pattern_file, sep=" ", header=None, names=pattern_columns)
+    edges = {}
+    pattern_edges = {}
+    
+    for _, row in pattern.iterrows():
+        edge_key = f"u{row['v1']+1},u{row['v2']+1}"
+        pattern_edges[edge_key] = (row['l1'], row['l2'], row['e'])
 
-    matched_edges = data.merge(
-        pattern,
-        left_on=['src_label', 'dst_label', 'edge_label'],
-        right_on=['p_src_label', 'p_dst_label', 'p_edge_label']
-    )
+    for pattern_key, (l1, l2, e) in pattern_edges.items():
+        matches = data[
+            (data['l1'] == l1) & 
+            (data['l2'] == l2) & 
+            (data['e'] == e)
+        ][['v1', 'v2']]
+        edges[pattern_key] = matches.rename(
+            columns={'v1': pattern_key.split(',')[0], 
+                    'v2': pattern_key.split(',')[1]}
+        )
 
-    results = matched_edges[['src', 'dst', 'p_src', 'p_dst']]
-    results = results.rename(columns={'src': 'u1', 'dst': 'u2', 'p_src': 'p1', 'p_dst': 'p2'})
+    result = None
+    for edge_relation in edges.values():
+        if result is None:
+            result = edge_relation
+        else:
+            result = pd.merge(result, edge_relation)
 
-    results = results.sort_values(by=['p1', 'p2', 'u1', 'u2'])
+    result = result.sort_values(by=list(result.columns))
 
     output_file = 'out/pandas_q1.csv'
-    results.to_csv(output_file, index=False, header=False)
-
+    result.to_csv(output_file, index=False, header=False)
     return output_file
 
 
