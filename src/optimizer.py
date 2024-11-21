@@ -39,7 +39,7 @@ class Optimizer(object):
         self._data = Graph('data', self._data_file)
         self._pattern = Graph('pattern', self._pattern_file)
 
-        sample_fraction = 0.1
+        sample_fraction = 0.01
         df_sampled = self._data.df.sample(frac=sample_fraction, random_state=42)
         df_sampled = df_sampled.reset_index(drop=True)
 

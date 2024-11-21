@@ -36,6 +36,8 @@ class Executor(object):
 
         df_G['edge_type'] = df_G['count'].apply(lambda x: 'undirected' if x == 2 else 'directed')
 
+        df_G.set_index(['edge_type', 'edge_label', 'src_label', 'dst_label'], inplace=True)
+
         df_P['min_id'] = df_P[['src_id', 'dst_id']].min(axis=1)
         df_P['max_id'] = df_P[['src_id', 'dst_id']].max(axis=1)
         df_P['edge_key'] = df_P['min_id'].astype(str) + '_' + df_P['max_id'].astype(str) + '_' + df_P['edge_label'].astype(str)
@@ -68,26 +70,32 @@ class Executor(object):
             edge_type_p = edge_p['edge_type']
 
             if edge_type_p == 'directed':
-                df_match = df_G[
-                    (df_G['edge_type'] == 'directed') &
-                    (df_G['edge_label'] == edge_label_p) &
-                    (df_G['src_label'] == src_label_p) &
-                    (df_G['dst_label'] == dst_label_p)
-                ][['src_id', 'dst_id']].copy()
+                condition = (
+                    (df_G.index.get_level_values('edge_type') == 'directed') &
+                    (df_G.index.get_level_values('edge_label') == edge_label_p) &
+                    (df_G.index.get_level_values('src_label') == src_label_p) &
+                    (df_G.index.get_level_values('dst_label') == dst_label_p)
+                )
+                df_match = df_G[condition].reset_index()[['src_id', 'dst_id']]
                 df_match.columns = [ui, uj]
             else:
-                df_match = df_G[
-                    (df_G['edge_type'] == 'undirected') &
-                    (df_G['edge_label'] == edge_label_p) &
-                    (
-                        ((df_G['src_label'] == src_label_p) & (df_G['dst_label'] == dst_label_p)) |
-                        ((df_G['src_label'] == dst_label_p) & (df_G['dst_label'] == src_label_p))
-                    )
-                ][['src_id', 'dst_id']].copy()
-                df_match_rev = df_match.copy()
-                df_match_rev.columns = [uj, ui]
-                df_match.columns = [ui, uj]
-                df_match = pd.concat([df_match, df_match_rev], ignore_index=True)
+                condition1 = (
+                    (df_G.index.get_level_values('edge_type') == 'undirected') &
+                    (df_G.index.get_level_values('edge_label') == edge_label_p) &
+                    (df_G.index.get_level_values('src_label') == src_label_p) &
+                    (df_G.index.get_level_values('dst_label') == dst_label_p)
+                )
+                condition2 = (
+                    (df_G.index.get_level_values('edge_type') == 'undirected') &
+                    (df_G.index.get_level_values('edge_label') == edge_label_p) &
+                    (df_G.index.get_level_values('src_label') == dst_label_p) &
+                    (df_G.index.get_level_values('dst_label') == src_label_p)
+                )
+                df_match1 = df_G[condition1].reset_index()[['src_id', 'dst_id']]
+                df_match2 = df_G[condition2].reset_index()[['src_id', 'dst_id']]
+                df_match1.columns = [ui, uj]
+                df_match2.columns = [ui, uj]
+                df_match = pd.concat([df_match1, df_match2], ignore_index=True)
 
             df_match.drop_duplicates(inplace=True)
             relations[item] = df_match
@@ -100,14 +108,17 @@ class Executor(object):
             else:
                 result_df = pd.merge(result_df, df_relation, how='inner')
 
-        for var in variable_names:
-            if var not in result_df.columns:
-                result_df[var] = np.nan
+        if result_df is not None and not result_df.empty:
+            for var in variable_names:
+                if var not in result_df.columns:
+                    result_df[var] = np.nan
 
-        result_df = result_df[variable_names]
-        result_df.dropna(inplace=True)
-        result_df = result_df.astype(int)
-        result_df.sort_values(by=variable_names, inplace=True)
+            result_df = result_df[variable_names]
+            result_df.dropna(inplace=True)
+            result_df = result_df.astype(int)
+            result_df.sort_values(by=variable_names, inplace=True)
+        else:
+            result_df = pd.DataFrame(columns=variable_names)
 
         output_file = os.path.join('out', 'executor.csv')
         os.makedirs('out', exist_ok=True)
