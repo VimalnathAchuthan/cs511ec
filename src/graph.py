@@ -10,35 +10,25 @@ class Graph(object):
     def __init__(self, name: str, file_path: str):
         self._name = name
         self._path = file_path
-        self._is_undirected = True
-        self._vertex_count = -1
-        self._edge_count = -1
-        self.df = None
+        
+        self._data = pd.read_csv(file_path, sep=' ', header=None)
+        
+        self._is_undirected = self._check_undirected()
+        
+        self._vertex_count = self._count_vertices()
+        self._edge_count = self._count_edges()
 
-        if not file_path:
-            self._vertex_count = 0
-            self._edge_count = 0
-            self._is_undirected = True
-            self.df = pd.DataFrame(columns=['src_id', 'dst_id', 'src_label', 'dst_label', 'edge_label'])
-            return
+    def _check_undirected(self) -> bool:
+        edges = set(tuple(sorted(row[:2])) for row in self._data.values)
+        return len(edges) < len(self._data)
 
-        df = pd.read_csv(file_path, sep=' ', header=None,
-                         names=['src_id', 'dst_id', 'src_label', 'dst_label', 'edge_label'])
+    def _count_vertices(self) -> int:
+        return len(set(self._data[0]).union(set(self._data[1])))
 
-        self.df = df
-
-        vertices = pd.concat([df['src_id'], df['dst_id']]).unique()
-        self._vertex_count = len(vertices)
-
-        df['min_id'] = df[['src_id', 'dst_id']].min(axis=1)
-        df['max_id'] = df[['src_id', 'dst_id']].max(axis=1)
-        df['edge_key'] = df['min_id'].astype(str) + '_' + df['max_id'].astype(str) + '_' + df['edge_label'].astype(str)
-
-        edge_counts = df.groupby('edge_key').size()
-
-        self._edge_count = len(edge_counts)
-
-        self._is_undirected = all(edge_counts == 2)
+    def _count_edges(self) -> int:
+        if self._is_undirected:
+            return len(set(tuple(sorted(row[:2])) for row in self._data.values))
+        return len(self._data)
 
     def print_statistics(self) -> None:
         density = self._edge_count / self._vertex_count
