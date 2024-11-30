@@ -6,6 +6,8 @@
 '''
 
 import pandas as pd
+import numpy as np
+import os
 
 from src.difference import Difference
 from src.optimizer import Optimizer
@@ -15,27 +17,88 @@ from src.report import get_file, report
 class Executor(object):
     def __init__(self, data: str, pattern: str):
         self._opt = Optimizer(data, pattern)
-        # TODO: begin of your codes
-        '''
-        requirement:
-            1. [optional] can define and initialize new fields here
-            2. please put expensive computation inside self.result()
-        '''
-        # TODO: end of your codes
+        self._opt.run()
+        self._plan = self._opt._plan
+        self._data = self._opt._data
+        self._pattern = self._opt._pattern
 
     @report
     def result(self) -> str:
-        # TODO: begin of your codes
-        '''
-        requirements
-            1. use the Optimizer to compute an optimized plan
-            2. follow the plan to compute the result
-            3. save the final result to a csv file
-            4. return a string pointing the output file
-            5. you can add new fields and methods, and use them here
-        '''
-        return 'out/executor.csv'
-        # TODO: end of your codes
+        df_G = self._data.df
+        df_P = self._pattern.df
+
+        pattern_vertices = np.sort(pd.unique(df_P[['src_id', 'dst_id']].values.ravel()))
+        variable_names = ['u{}'.format(i+1) for i in range(len(pattern_vertices))]
+        dict_pv = dict(zip(pattern_vertices, variable_names))
+        dict_pv_rev = {v: k for k, v in dict_pv.items()}
+
+        relations = {}
+
+        for item, _ in self._plan:
+            ui, uj = item.split(',')
+
+            src_id_p = dict_pv_rev[ui]
+            dst_id_p = dict_pv_rev[uj]
+
+            edge_p = df_P[
+                ((df_P['src_id'] == src_id_p) & (df_P['dst_id'] == dst_id_p)) |
+                ((df_P['src_id'] == dst_id_p) & (df_P['dst_id'] == src_id_p))
+            ].iloc[0]
+
+            src_label_p = edge_p['src_label']
+            dst_label_p = edge_p['dst_label']
+            edge_label_p = edge_p['edge_label']
+            edge_type_p = edge_p['edge_type']
+
+            if edge_type_p == 0:  # Directed
+                df_match = df_G[
+                    (df_G['edge_type'] == 0) &
+                    (df_G['edge_label'] == edge_label_p) &
+                    (df_G['src_label'] == src_label_p) &
+                    (df_G['dst_label'] == dst_label_p)
+                ][['src_id', 'dst_id']].rename(columns={'src_id': ui, 'dst_id': uj})
+            else:  # Undirected
+                df_match = df_G[
+                    (df_G['edge_type'] == 1) &
+                    (df_G['edge_label'] == edge_label_p) &
+                    (
+                        ((df_G['src_label'] == src_label_p) & (df_G['dst_label'] == dst_label_p)) |
+                        ((df_G['src_label'] == dst_label_p) & (df_G['dst_label'] == src_label_p))
+                    )
+                ][['src_id', 'dst_id']]
+                df_match_rev = df_match.rename(columns={'src_id': uj, 'dst_id': ui})
+                df_match = df_match.rename(columns={'src_id': ui, 'dst_id': uj})
+                df_match = pd.concat([df_match, df_match_rev], ignore_index=True)
+
+            df_match.drop_duplicates(inplace=True)
+            relations[item] = df_match
+
+        # Execute joins according to the plan
+        result_df = None
+        for item, _ in self._plan:
+            df_relation = relations[item]
+            if result_df is None:
+                result_df = df_relation
+            else:
+                common_vars = list(set(result_df.columns) & set(df_relation.columns))
+                result_df = pd.merge(result_df, df_relation, how='inner', on=common_vars, sort=False)
+
+        # Ensure all variables are present
+        for var in variable_names:
+            if var not in result_df.columns:
+                result_df[var] = np.nan
+
+        # Finalize the result
+        result_df = result_df[variable_names]
+        result_df.dropna(inplace=True)
+        result_df = result_df.astype(np.int32)
+        result_df.sort_values(by=variable_names, inplace=True)
+
+        output_file = os.path.join('out', 'executor.csv')
+        os.makedirs('out', exist_ok=True)
+        result_df.to_csv(output_file, index=False, header=False)
+
+        return output_file
 
 
 def test_count(data: str, pattern: str, row_e: int, column_e: int) -> int:
